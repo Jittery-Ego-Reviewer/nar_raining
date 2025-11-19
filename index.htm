@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Story Sequencing Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .card-slot {
+            aspect-ratio: 4 / 3;
+            border-radius: 1rem;
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .picture-card {
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden; /* Ensures image corners are rounded */
+        }
+        .picture-card:active {
+            cursor: grabbing;
+            transform: scale(1.05);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            z-index: 10;
+        }
+        #story-grammar-bar {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.5s ease, transform 0.5s ease;
+            visibility: hidden;
+        }
+        #story-grammar-bar.visible {
+            opacity: 1;
+            transform: translateY(0);
+            visibility: visible;
+        }
+        .story-icon-wrapper {
+            cursor: grab;
+            transition: transform 0.2s ease-in-out;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+        .story-icon-wrapper:active {
+            cursor: grabbing;
+            transform: scale(1.1);
+        }
+        .placed-icon {
+            position: absolute;
+            z-index: 100;
+            transform: translate(-50%, -50%);
+            cursor: grab;
+            width: 80px; /* Adjust size of placed icons if needed */
+            height: 80px;
+        }
+        .placed-icon:active {
+            cursor: grabbing;
+        }
+        .success-glow {
+            animation: glow 2s ease-in-out;
+        }
+        @keyframes glow {
+            0% { border-color: transparent; }
+            50% { border-color: #4ade80; box-shadow: 0 0 20px #4ade80; }
+            100% { border-color: transparent; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div id="game-container" class="w-full max-w-4xl mx-auto">
+        <div id="picture-grid" class="grid grid-cols-2 gap-4 md:gap-6 p-4 md:p-6 bg-white rounded-2xl shadow-lg border-4 border-transparent">
+            <div class="card-slot bg-gray-200" data-slot-id="1"></div>
+            <div class="card-slot bg-gray-200" data-slot-id="2"></div>
+            <div class="card-slot bg-gray-200" data-slot-id="3"></div>
+            <div class="card-slot bg-gray-200" data-slot-id="4"></div>
+        </div>
+    </div>
+
+    <div id="story-grammar-bar" class="w-full max-w-4xl mx-auto mt-8 p-4 bg-white rounded-2xl shadow-lg">
+        <div id="icon-container" class="flex flex-wrap justify-evenly gap-4">
+            </div>
+    </div>
+    
+    <button id="reset-button" class="mt-8 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition hidden">
+        Reset Icons
+    </button>
+
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const pictureGrid = document.getElementById('picture-grid');
+            const storyGrammarBar = document.getElementById('story-grammar-bar');
+            const iconContainer = document.getElementById('icon-container');
+            const resetButton = document.getElementById('reset-button');
+            let draggedCard = null;
+            let gameSolved = false;
+            let draggedPlacedIcon = null;
+
+            // ===============================================================
+            // EDIT HERE: PICTURE CARDS
+            // Replace the 'src' values with the paths to your 4 PNG files.
+            // The 'id' determines the correct order (1, 2, 3, 4).
+            // ===============================================================
+            const storyPictures = [
+                { id: 1, src: 'pics/pic1.png' },
+                { id: 2, src: 'pics/pic2.png' },
+                { id: 3, src: 'pics/pic3.png' },
+                { id: 4, src: 'pics/pic4.png' }
+            ];
+
+            // ===============================================================
+            // EDIT HERE: STORY GRAMMAR ICONS
+            // Replace 'src' with your icon PNG paths and 'title' with the icon name.
+            // You can add or remove icons from this list.
+            // ===============================================================
+            const storyIcons = [
+                { src: 'icons/setting.png', title:'背景' },
+                { src: 'icons/problem.png', title:'起因' },
+                { src: 'icons/feeling.png', title:'内在反應' },
+                { src: 'icons/plan.png', title: '計劃' },
+                { src: 'icons/action.png', title:'行動' },
+                { src: 'icons/consequence.png', title:'結果' },
+                { src: 'icons/ending.png', title: '感受' },
+            ];
+            
+            // --- Creates a picture card element from data ---
+            function createPictureCard(pic) {
+                const card = document.createElement('div');
+                card.className = 'picture-card rounded-xl bg-gray-300';
+                card.draggable = true;
+                card.dataset.cardId = pic.id;
+                // This now creates an <img> tag inside the card
+                card.innerHTML = `<img src="${pic.src}" alt="Story picture ${pic.id}" class="w-full h-full object-cover rounded-xl pointer-events-none">`;
+                card.addEventListener('dragstart', handleCardDragStart);
+                return card;
+            }
+
+            // --- Game Initialization ---
+            function initGame() {
+                gameSolved = false;
+                pictureGrid.classList.remove('success-glow');
+                storyGrammarBar.classList.remove('visible');
+                resetButton.classList.add('hidden');
+                document.body.removeEventListener('dragover', handleIconDragOver);
+                document.body.removeEventListener('drop', handleIconDrop);
+                document.querySelectorAll('.placed-icon').forEach(icon => icon.remove());
+                const slots = document.querySelectorAll('.card-slot');
+                slots.forEach(slot => {
+                    slot.innerHTML = '';
+                    slot.addEventListener('dragover', handleCardDragOver);
+                    slot.addEventListener('drop', handleCardDrop);
+                });
+                
+                let shuffledPictures;
+                const isOrderCorrect = (arr) => arr.every((pic, index) => pic.id === index + 1);
+                do {
+                    shuffledPictures = [...storyPictures].sort(() => Math.random() - 0.5);
+                } while (isOrderCorrect(shuffledPictures));
+
+                shuffledPictures.forEach((pic, index) => {
+                    const card = createPictureCard(pic);
+                    slots[index].appendChild(card);
+                });
+
+                iconContainer.innerHTML = '';
+                storyIcons.forEach(iconData => {
+                    const iconWrapper = document.createElement('div');
+                    iconWrapper.className = 'story-icon-wrapper';
+                    iconWrapper.draggable = true;
+                    iconWrapper.dataset.src = iconData.src; // Use data-src to store image path
+                    iconWrapper.dataset.title = iconData.title;
+                    // Create an <img> for the icon
+                    iconWrapper.innerHTML = `
+                        <img src="${iconData.src}" alt="${iconData.title}" class="w-16 h-16 object-contain pointer-events-none">
+                        <span class="text-xs text-gray-600 font-medium pointer-events-none">${iconData.title}</span>
+                    `;
+                    iconWrapper.addEventListener('dragstart', handleIconDragStart);
+                    iconContainer.appendChild(iconWrapper);
+                });
+            }
+            
+            // --- NEW FUNCTION TO RESET ONLY ICONS ---
+            function resetIcons() {
+                // Find all icons that have been placed on the screen and remove them.
+                document.querySelectorAll('.placed-icon').forEach(icon => icon.remove());
+            }
+
+            // --- Picture Card Drag Handlers ---
+            function handleCardDragStart(e) {
+                draggedCard = e.target;
+            }
+            function handleCardDragOver(e) {
+                e.preventDefault();
+            }
+            function handleCardDrop(e) {
+                e.preventDefault();
+                const targetSlot = e.target.closest('.card-slot');
+                if (targetSlot && draggedCard) {
+                    const existingCard = targetSlot.querySelector('.picture-card');
+                    const sourceSlot = draggedCard.parentElement;
+                    if (existingCard) {
+                        sourceSlot.appendChild(existingCard);
+                    }
+                    targetSlot.appendChild(draggedCard);
+                    draggedCard = null;
+                    checkOrder();
+                }
+            }
+            
+            // --- Icon Drag & Drop Handlers (for new and placed icons) ---
+            function handleIconDragStart(e) {
+                const src = e.target.dataset.src;
+                const title = e.target.dataset.title;
+                e.dataTransfer.setData('text/plain', JSON.stringify({ src, title }));
+            }
+            function handleIconDragOver(e) { e.preventDefault(); }
+            function handleIconDrop(e) {
+                e.preventDefault();
+                const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+
+                if (draggedPlacedIcon) {
+                    draggedPlacedIcon.style.left = `${e.pageX}px`;
+                    draggedPlacedIcon.style.top = `${e.pageY}px`;
+                } else {
+                    const iconClone = document.createElement('div');
+                    iconClone.className = 'placed-icon';
+                    iconClone.title = data.title;
+                    iconClone.draggable = true;
+                    iconClone.innerHTML = `<img src="${data.src}" alt="${data.title}" class="w-full h-full object-contain pointer-events-none">`;
+                    iconClone.addEventListener('dragstart', handlePlacedIconDragStart);
+                    iconClone.addEventListener('dragend', handlePlacedIconDragEnd);
+                    iconClone.style.left = `${e.pageX}px`;
+                    iconClone.style.top = `${e.pageY}px`;
+                    document.body.appendChild(iconClone);
+                }
+            }
+            
+            function handlePlacedIconDragStart(e) {
+                draggedPlacedIcon = e.target;
+                const imgSrc = draggedPlacedIcon.querySelector('img').src;
+                e.dataTransfer.setData('text/plain', JSON.stringify({ src: imgSrc, title: draggedPlacedIcon.title }));
+                setTimeout(() => { draggedPlacedIcon.style.visibility = 'hidden'; }, 0);
+            }
+            function handlePlacedIconDragEnd() {
+                if (draggedPlacedIcon) {
+                    draggedPlacedIcon.style.visibility = 'visible';
+                    draggedPlacedIcon = null;
+                }
+            }
+
+            // --- Game Logic ---
+            function checkOrder() {
+                const slots = document.querySelectorAll('.card-slot');
+                let correctCount = 0;
+                slots.forEach(slot => {
+                    const card = slot.querySelector('.picture-card');
+                    if (card && card.dataset.cardId === slot.dataset.slotId) {
+                        correctCount++;
+                    }
+                });
+
+                if (correctCount === 4) {
+                    gameSolved = true;
+                    pictureGrid.classList.add('success-glow');
+                    document.querySelectorAll('.picture-card').forEach(card => card.draggable = false);
+                    playSuccessSound();
+                    
+                    setTimeout(() => {
+                        storyGrammarBar.classList.add('visible');
+                        resetButton.classList.remove('hidden');
+                        document.body.addEventListener('dragover', handleIconDragOver);
+                        document.body.addEventListener('drop', handleIconDrop);
+                    }, 500);
+                }
+            }
+            
+            function playSuccessSound() {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                oscillator.type = 'sine';
+                gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+                gainNode.gain.linearRampToValueAtTime(0.5, audioContext.currentTime + 0.05);
+                oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(880, audioContext.currentTime + 0.2);
+                gainNode.gain.exponentialRampToValueAtTime(0.00001, audioContext.currentTime + 0.2);
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.2);
+            }
+
+            // --- MODIFIED EVENT LISTENER ---
+            // Now calls the new function to only reset the icons
+            resetButton.addEventListener('click', resetIcons);
+            
+            // This still starts the whole game from the beginning on page load
+            initGame();
+        });
+    </script>
+</body>
+</html>
